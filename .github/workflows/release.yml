@@ -30,7 +30,14 @@ jobs:
 
       - name: Read version from package.json
         id: version
-        run: echo "version=$(node -p 'require(\"./package.json\").version')" >> "$GITHUB_OUTPUT"
+        run: |
+          VERSION=$(node -p 'require("./package.json").version')
+          if [ -z "$VERSION" ]; then
+            echo "::error::package.json version is missing or empty"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Using version: $VERSION"
 
       - name: Check if tag already exists
         id: tag_check
