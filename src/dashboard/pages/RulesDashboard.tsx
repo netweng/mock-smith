@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useRules, useEnabled } from '../hooks/useStorage';
+import { useRules } from '../hooks/useStorage';
 import { MethodBadge } from '../components/MethodBadge';
 import { storage } from '../../shared/storage';
 import { generateId, RuleAction } from '../../shared/types';
@@ -14,7 +14,6 @@ const ACTION_BADGE_STYLES: Record<RuleAction, string> = {
 export const RulesDashboard: React.FC = () => {
   const navigate = useNavigate();
   const { rules, loading } = useRules();
-  const { enabled, toggle } = useEnabled();
   const [searchTerm, setSearchTerm] = useState('');
 
   const activeCount = rules.filter((r) => r.enabled).length;
@@ -70,22 +69,6 @@ export const RulesDashboard: React.FC = () => {
             <span className="text-xs font-bold text-primary">
               {activeCount} / {rules.length}
             </span>
-          </div>
-        </div>
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-3 bg-slate-50 py-1.5 px-3 rounded-full border border-slate-100">
-            <span className="text-sm font-semibold text-headline">
-              {enabled ? 'Interception Enabled' : 'Interception Disabled'}
-            </span>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={enabled}
-                onChange={toggle}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
-            </label>
           </div>
         </div>
       </header>

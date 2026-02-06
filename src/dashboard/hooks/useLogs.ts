@@ -1,13 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { TrafficLogEntry } from '../../shared/types';
 import { storage } from '../../shared/storage';
 
-const POLL_INTERVAL = 2000;
+const isChromeExtension =
+  typeof chrome !== 'undefined' && !!chrome?.runtime?.onMessage;
 
 export function useLogs() {
   const [logs, setLogs] = useState<TrafficLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
   const refresh = useCallback(async () => {
     const data = await storage.getLogs();
@@ -22,10 +22,17 @@ export function useLogs() {
 
   useEffect(() => {
     refresh();
-    intervalRef.current = setInterval(refresh, POLL_INTERVAL);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+
+    if (!isChromeExtension) return;
+
+    // Listen for real-time log pushes from service worker
+    const listener = (message: any) => {
+      if (message.type === 'LOG_ADDED' && message.entry) {
+        setLogs((prev) => [message.entry, ...prev]);
+      }
     };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
   }, [refresh]);
 
   return { logs, loading, refresh, clear };

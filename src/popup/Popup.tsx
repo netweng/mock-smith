@@ -2,6 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Rule } from '../shared/types';
 import { storage } from '../shared/storage';
 
+const isChromeExtension =
+  typeof chrome !== 'undefined' && !!chrome?.tabs?.query;
+
 const getMethodColor = (method: string) => {
   switch (method?.toUpperCase()) {
     case 'GET': return 'bg-blue-50 text-blue-600 border-blue-100';
@@ -15,16 +18,16 @@ const getMethodColor = (method: string) => {
 
 export const Popup: React.FC = () => {
   const [rules, setRules] = useState<Rule[]>([]);
-  const [enabled, setEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
 
+  // Per-tab state
+  const [tabId, setTabId] = useState<number | null>(null);
+  const [tabEnabled, setTabEnabled] = useState(true);
+  const [tabInjectable, setTabInjectable] = useState(true);
+
   const refresh = useCallback(async () => {
-    const [r, e] = await Promise.all([
-      storage.getRules(),
-      storage.getEnabled(),
-    ]);
+    const r = await storage.getRules();
     setRules(r);
-    setEnabled(e);
     setLoading(false);
   }, []);
 
@@ -33,8 +36,39 @@ export const Popup: React.FC = () => {
     return storage.onChanged(refresh);
   }, [refresh]);
 
-  const handleToggleGlobal = async () => {
-    await storage.setEnabled(!enabled);
+  // Get current tab info
+  useEffect(() => {
+    if (!isChromeExtension) return;
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const tab = tabs[0];
+      if (!tab?.id) return;
+
+      const injectable =
+        !!tab.url &&
+        (tab.url.startsWith('http://') || tab.url.startsWith('https://'));
+      setTabId(tab.id);
+      setTabInjectable(injectable);
+
+      if (injectable) {
+        chrome.runtime.sendMessage(
+          { type: 'GET_TAB_ENABLED', tabId: tab.id },
+          (response) => {
+            setTabEnabled(response?.enabled !== false);
+          },
+        );
+      }
+    });
+  }, []);
+
+  const handleToggleTab = () => {
+    if (tabId === null || !tabInjectable) return;
+    const newEnabled = !tabEnabled;
+    setTabEnabled(newEnabled);
+    chrome.runtime.sendMessage({
+      type: 'SET_TAB_ENABLED',
+      tabId,
+      enabled: newEnabled,
+    });
   };
 
   const handleToggleRule = async (id: string) => {
@@ -47,6 +81,7 @@ export const Popup: React.FC = () => {
 
   const activeCount = rules.filter((r) => r.enabled).length;
   const enabledRules = rules.filter((r) => r.enabled);
+  const effectiveActive = tabEnabled && tabInjectable;
 
   if (loading) {
     return (
@@ -67,32 +102,32 @@ export const Popup: React.FC = () => {
             </div>
             <h1 className="text-headline text-lg font-bold leading-tight tracking-tight font-display">MockSmith</h1>
           </div>
-        </div>
-
-        {/* Master Switch Card */}
-        <div className="flex items-center justify-between bg-background p-3 rounded-lg border border-secondary/30 shadow-sm">
-          <div className="flex items-center gap-2">
-            <span className={`material-symbols-outlined ${enabled ? 'text-primary' : 'text-gray-400'}`} style={{ fontSize: '20px' }}>
-              power_settings_new
-            </span>
-            <span className="text-headline text-sm font-bold">Master Switch</span>
-          </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={handleToggleGlobal}
-              className="sr-only peer"
-            />
-            <div className="w-10 h-5 bg-gray-200 rounded-full peer peer-checked:bg-primary transition-colors"></div>
-            <div className="absolute left-0 top-0 bg-white w-5 h-5 rounded-full border border-gray-300 shadow-sm transition-transform peer-checked:translate-x-full peer-checked:border-primary"></div>
-          </label>
+          
+          {/* Per-Tab Switch */}
+          {isChromeExtension && (
+            <div className="flex items-center gap-2">
+              {!tabInjectable && (
+                <span className="text-[10px] text-paragraph">N/A</span>
+              )}
+              <label className={`relative inline-flex items-center ${tabInjectable ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
+                <input
+                  type="checkbox"
+                  checked={tabEnabled}
+                  onChange={handleToggleTab}
+                  disabled={!tabInjectable}
+                  className="sr-only peer"
+                />
+                <div className={`w-10 h-5 bg-gray-200 rounded-full peer peer-checked:bg-primary transition-colors`}></div>
+                <div className={`absolute left-0 top-0 bg-white w-5 h-5 rounded-full border border-gray-300 shadow-sm transition-transform peer-checked:translate-x-full peer-checked:border-primary`}></div>
+              </label>
+            </div>
+          )}
         </div>
       </header>
 
       {/* Active Rules List */}
       {enabledRules.length > 0 && (
-        <div className={`px-3 py-2 max-h-[240px] overflow-y-auto transition-opacity ${!enabled ? 'opacity-50 pointer-events-none' : ''}`}>
+        <div className={`px-3 py-2 max-h-[240px] overflow-y-auto transition-opacity ${!effectiveActive ? 'opacity-50 pointer-events-none' : ''}`}>
           <h3 className="text-xs font-bold text-secondary uppercase tracking-wider px-2 mb-2">Active Rules</h3>
           <div className="flex flex-col gap-2">
             {enabledRules.slice(0, 8).map((rule) => (
@@ -167,7 +202,7 @@ export const Popup: React.FC = () => {
         </button>
         <div className="flex justify-between mt-3 px-1">
           <div className="flex items-center gap-1.5 text-xs text-paragraph">
-            {enabled ? (
+            {effectiveActive ? (
               <>
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>

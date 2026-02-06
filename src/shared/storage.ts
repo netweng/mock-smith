@@ -2,7 +2,6 @@ import { Rule, TrafficLogEntry } from './types';
 
 const KEYS = {
   RULES: 'mocksmith_rules',
-  ENABLED: 'mocksmith_enabled',
 } as const;
 
 // Detect extension context
@@ -11,7 +10,6 @@ const isChromeExtension =
 
 // --- In-memory fallback for dev mode (vite dev server) ---
 let memRules: Rule[] = [];
-let memEnabled = true;
 const devListeners = new Set<() => void>();
 
 function notifyDevListeners() {
@@ -34,23 +32,6 @@ export const storage = {
       await chrome.storage.local.set({ [KEYS.RULES]: rules });
     } else {
       memRules = rules;
-      notifyDevListeners();
-    }
-  },
-
-  async getEnabled(): Promise<boolean> {
-    if (isChromeExtension) {
-      const data = await chrome.storage.local.get(KEYS.ENABLED);
-      return data[KEYS.ENABLED] !== false;
-    }
-    return memEnabled;
-  },
-
-  async setEnabled(enabled: boolean): Promise<void> {
-    if (isChromeExtension) {
-      await chrome.storage.local.set({ [KEYS.ENABLED]: enabled });
-    } else {
-      memEnabled = enabled;
       notifyDevListeners();
     }
   },
@@ -115,7 +96,7 @@ export const storage = {
       const listener = (changes: {
         [key: string]: chrome.storage.StorageChange;
       }) => {
-        if (changes[KEYS.RULES] || changes[KEYS.ENABLED]) {
+        if (changes[KEYS.RULES]) {
           callback();
         }
       };

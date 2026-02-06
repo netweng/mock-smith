@@ -1,13 +1,12 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { RoutePath } from '../../shared/types';
-import { useRules, useEnabled } from '../hooks/useStorage';
+import { useRules } from '../hooks/useStorage';
 
 export const Sidebar: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { rules } = useRules();
-  const { enabled, toggle } = useEnabled();
 
   const isActive = (path: string) => location.pathname === path;
 
@@ -56,44 +55,8 @@ export const Sidebar: React.FC = () => {
           <span>Traffic Logs</span>
         </button>
 
-        <div className="mt-8">
-          <div className="flex items-center justify-between px-3 mb-2">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              Labels
-            </span>
-            <span className="text-[9px] font-bold text-paragraph/40 bg-slate-100 px-1.5 py-0.5 rounded">
-              WIP
-            </span>
-          </div>
-          <div className="space-y-1">
-            <div className="flex items-center gap-3 px-3 py-1.5 text-sm text-paragraph/50 rounded-lg">
-              <span className="size-2 rounded-full bg-emerald-300"></span>
-              <span>Production</span>
-            </div>
-            <div className="flex items-center gap-3 px-3 py-1.5 text-sm text-paragraph/50 rounded-lg">
-              <span className="size-2 rounded-full bg-amber-300"></span>
-              <span>Staging</span>
-            </div>
-          </div>
-        </div>
       </nav>
 
-      <div className="p-4 border-t border-border-light space-y-3">
-        <div className="flex items-center justify-between px-1">
-          <span className="text-xs font-semibold text-headline">
-            {enabled ? 'Interception ON' : 'Interception OFF'}
-          </span>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={toggle}
-              className="sr-only peer"
-            />
-            <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
-          </label>
-        </div>
-      </div>
     </aside>
   );
 };

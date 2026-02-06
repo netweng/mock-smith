@@ -19,23 +19,3 @@ export function useRules() {
 
   return { rules, loading, refresh };
 }
-
-export function useEnabled() {
-  const [enabled, setEnabledState] = useState(true);
-
-  const refresh = useCallback(async () => {
-    const val = await storage.getEnabled();
-    setEnabledState(val);
-  }, []);
-
-  useEffect(() => {
-    refresh();
-    return storage.onChanged(refresh);
-  }, [refresh]);
-
-  const toggle = useCallback(async () => {
-    await storage.setEnabled(!enabled);
-  }, [enabled]);
-
-  return { enabled, toggle };
-}

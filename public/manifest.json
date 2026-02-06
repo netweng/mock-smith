@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "description": "Forge API responses. No backend. No mercy. Browser-first API mocking for REST & GraphQL.",
   "permissions": [
-    "storage"
+    "storage",
+    "scripting"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -16,20 +17,6 @@
     "default_popup": "popup.html",
     "default_title": "MockSmith"
   },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["bridge.js"],
-      "run_at": "document_start",
-      "world": "ISOLATED"
-    },
-    {
-      "matches": ["<all_urls>"],
-      "js": ["interceptor.js"],
-      "run_at": "document_start",
-      "world": "MAIN"
-    }
-  ],
   "options_page": "dashboard.html",
   "icons": {}
 }
