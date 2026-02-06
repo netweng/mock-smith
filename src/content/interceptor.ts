@@ -14,6 +14,8 @@ import type { Rule } from '../shared/types';
   let rules: Rule[] = [];
   let enabled = false;
 
+  const MAX_RESPONSE_BODY = 10240; // 10 KB
+
   function findMatch(
     url: string,
     method: string,
@@ -24,12 +26,68 @@ import type { Rule } from '../shared/types';
     return matchRule(rules, url, method, body, headers);
   }
 
+  function truncateBody(text: string): string {
+    if (text.length <= MAX_RESPONSE_BODY) return text;
+    return text.substring(0, MAX_RESPONSE_BODY) + '...[truncated]';
+  }
+
+  const TEXT_CONTENT_TYPES = /^(application\/json|application\/graphql|text\/)/i;
+
+  /** Read response body efficiently: skip binary, limit to MAX_RESPONSE_BODY bytes via stream reader */
+  async function safeReadResponseBody(response: Response): Promise<string | undefined> {
+    const ct = response.headers.get('Content-Type') || '';
+    if (!TEXT_CONTENT_TYPES.test(ct)) return '[binary content skipped]';
+
+    const cloned = response.clone();
+    const reader = cloned.body?.getReader();
+    if (!reader) {
+      // Fallback for environments without ReadableStream body
+      const text = await cloned.text();
+      return truncateBody(text);
+    }
+
+    const decoder = new TextDecoder();
+    let result = '';
+    while (result.length < MAX_RESPONSE_BODY) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      result += decoder.decode(value, { stream: true });
+    }
+    reader.cancel();
+    return truncateBody(result);
+  }
+
+  // Extract GraphQL operationName from parsed body or URL
+  function extractOperationName(body: any, url: string): string | string[] | undefined {
+    if (body && typeof body === 'string') {
+      try {
+        const parsed = JSON.parse(body);
+        if (Array.isArray(parsed)) {
+          const names = parsed.map((p: any) => p.operationName).filter(Boolean);
+          return names.length > 0 ? names : undefined;
+        }
+        if (parsed.operationName) return parsed.operationName;
+      } catch {}
+    }
+    if (body && typeof body === 'object' && !Array.isArray(body)) {
+      if (body.operationName) return body.operationName;
+    }
+    try {
+      const urlObj = new URL(url, location.origin);
+      const op = urlObj.searchParams.get('operationName');
+      if (op) return op;
+    } catch {}
+    return undefined;
+  }
+
   function notifyInterception(
     url: string,
     method: string,
     rule: Rule,
     requestHeaders?: Record<string, string>,
     responseStatus?: number,
+    operationName?: string | string[],
+    responseBody?: string,
   ) {
     window.postMessage(
       {
@@ -41,9 +99,12 @@ import type { Rule } from '../shared/types';
           ruleId: rule.id,
           ruleName: rule.name,
           action: rule.action,
+          requestType: rule.type,
           timestamp: Date.now(),
           requestHeaders,
           responseStatus,
+          operationName,
+          responseBody,
         },
       },
       '*',
@@ -95,33 +156,6 @@ import type { Rule } from '../shared/types';
       // Ignore read errors
     }
     return undefined;
-  }
-
-  // --- Helper: extract GraphQL params from GET URL search params ---
-
-  function extractGraphQLFromUrl(url: string): any | undefined {
-    try {
-      const urlObj = new URL(url, location.origin);
-      const query = urlObj.searchParams.get('query');
-      const operationName = urlObj.searchParams.get('operationName');
-      const variablesStr = urlObj.searchParams.get('variables');
-
-      if (!query && !operationName) return undefined;
-
-      const result: any = {};
-      if (query) result.query = query;
-      if (operationName) result.operationName = operationName;
-      if (variablesStr) {
-        try {
-          result.variables = JSON.parse(variablesStr);
-        } catch {
-          // Ignore invalid variables JSON
-        }
-      }
-      return result;
-    } catch {
-      return undefined;
-    }
   }
 
   // --- Helper: extract headers as plain object ---
@@ -242,33 +276,52 @@ import type { Rule } from '../shared/types';
       }
     }
 
-    // For GET requests, extract GraphQL params from URL search params
-    const gqlBody = !body ? extractGraphQLFromUrl(url) : body;
-
     const headers = extractHeaders(input, init);
-    const matched = findMatch(url, method, gqlBody, headers);
+    const matched = findMatch(url, method, body, headers);
 
     if (matched) {
+      const opName = matched.type === 'graphql'
+        ? extractOperationName(body, url)
+        : undefined;
+
       if (matched.response.delay) {
         await new Promise((r) => setTimeout(r, matched.response.delay));
       }
 
       switch (matched.action) {
-        case 'passthrough':
-          notifyInterception(url, method, matched, headers, undefined);
-          return originalFetch.call(this, input, init);
+        case 'passthrough': {
+          try {
+            const response = await originalFetch.call(this, input, init);
+            let respBody: string | undefined;
+            try {
+              respBody = await safeReadResponseBody(response);
+            } catch {}
+            notifyInterception(url, method, matched, headers, response.status, opName, respBody);
+            return response;
+          } catch (err) {
+            notifyInterception(url, method, matched, headers, 0, opName,
+              `[fetch error] ${err instanceof Error ? err.message : String(err)}`);
+            throw err;
+          }
+        }
 
         case 'rewrite': {
-          const original = await originalFetch.call(this, input, init);
-          const rewritten = await buildRewriteResponse(original, matched);
-          notifyInterception(url, method, matched, headers, rewritten.status);
-          return rewritten;
+          try {
+            const original = await originalFetch.call(this, input, init);
+            const rewritten = await buildRewriteResponse(original, matched);
+            notifyInterception(url, method, matched, headers, rewritten.status, opName);
+            return rewritten;
+          } catch (err) {
+            notifyInterception(url, method, matched, headers, 0, opName,
+              `[fetch error] ${err instanceof Error ? err.message : String(err)}`);
+            throw err;
+          }
         }
 
         case 'mock':
         default: {
           const mockStatus = matched.response.status || 200;
-          notifyInterception(url, method, matched, headers, mockStatus);
+          notifyInterception(url, method, matched, headers, mockStatus, opName);
           return buildMockResponse(matched);
         }
       }
@@ -340,12 +393,13 @@ import type { Rule } from '../shared/types';
       // These are rare for GraphQL payloads.
     }
 
-    // For GET requests, extract GraphQL params from URL search params
-    const gqlBody = !body ? extractGraphQLFromUrl(url) : body;
-
-    const matched = findMatch(url, method, gqlBody, headers);
+    const matched = findMatch(url, method, body, headers);
 
     if (matched) {
+      const opName = matched.type === 'graphql'
+        ? extractOperationName(body, url)
+        : undefined;
+
       const responseBody =
         typeof matched.response.body === 'string'
           ? matched.response.body
@@ -354,13 +408,39 @@ import type { Rule } from '../shared/types';
       const delay = matched.response.delay || 0;
 
       switch (matched.action) {
-        case 'passthrough':
-          notifyInterception(url, method, matched, headers, undefined);
+        case 'passthrough': {
+          const xhr = this;
+          xhr.addEventListener('load', function ptHandler() {
+            xhr.removeEventListener('load', ptHandler);
+            let respBody: string | undefined;
+            try {
+              const text = typeof xhr.responseText === 'string' ? xhr.responseText : '';
+              respBody = truncateBody(text);
+            } catch {}
+            notifyInterception(url, method, matched, headers, xhr.status, opName, respBody);
+          });
+          xhr.addEventListener('error', function ptErrHandler() {
+            xhr.removeEventListener('error', ptErrHandler);
+            notifyInterception(url, method, matched, headers, 0, opName, '[xhr error]');
+          });
+          xhr.addEventListener('abort', function ptAbortHandler() {
+            xhr.removeEventListener('abort', ptAbortHandler);
+            notifyInterception(url, method, matched, headers, 0, opName, '[xhr abort]');
+          });
           return origSend.call(this, sendBody);
+        }
 
         case 'rewrite': {
           const xhr = this;
 
+          xhr.addEventListener('error', function rwErrHandler() {
+            xhr.removeEventListener('error', rwErrHandler);
+            notifyInterception(url, method, matched, headers, 0, opName, '[xhr error]');
+          });
+          xhr.addEventListener('abort', function rwAbortHandler() {
+            xhr.removeEventListener('abort', rwAbortHandler);
+            notifyInterception(url, method, matched, headers, 0, opName, '[xhr abort]');
+          });
           xhr.addEventListener('load', function rewriteHandler() {
             xhr.removeEventListener('load', rewriteHandler);
             const rewriteStatus = matched.response.status || xhr.status;
@@ -390,7 +470,7 @@ import type { Rule } from '../shared/types';
               Object.defineProperty(xhr, 'responseText', { writable: true, value: responseBody });
               Object.defineProperty(xhr, 'response', { writable: true, value: responseBody });
             }
-            notifyInterception(url, method, matched, headers, rewriteStatus);
+            notifyInterception(url, method, matched, headers, rewriteStatus, opName);
           });
           return origSend.call(this, sendBody);
         }
@@ -398,7 +478,7 @@ import type { Rule } from '../shared/types';
         case 'mock':
         default: {
           const mockStatus = matched.response.status || 200;
-          notifyInterception(url, method, matched, headers, mockStatus);
+          notifyInterception(url, method, matched, headers, mockStatus, opName);
           fakeXhrResponse(this, mockStatus, responseBody, url, delay);
           return;
         }

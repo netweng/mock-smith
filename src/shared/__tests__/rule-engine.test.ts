@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchUrl, matchHeaders, matchGraphQL, matchRule, normalizeGraphQLQuery } from '../rule-engine';
+import { matchUrl, matchHeaders, matchGraphQL, matchRule, normalizeGraphQLQuery, extractGraphQLFromUrl } from '../rule-engine';
 import { makeRule, makeGraphQLRule } from './helpers';
 
 describe('matchUrl', () => {
@@ -336,14 +336,30 @@ describe('matchRule', () => {
     expect(result).not.toBeNull();
   });
 
-  it('matches GraphQL rule with body from GET params (pre-extracted)', () => {
-    // Simulates what the interceptor does: extracting GraphQL params from URL as a body object
+  it('auto-extracts GraphQL params from URL when no body provided', () => {
     const rules = [makeGraphQLRule({
       match: { url: '*/graphql*', method: 'GET' },
       graphqlMatch: { operationName: 'GetUser' },
     })];
-    const pseudoBody = { operationName: 'GetUser', query: 'query GetUser { user { id } }' };
-    const result = matchRule(rules, 'https://example.com/graphql?query=...', 'GET', pseudoBody);
+    const url = 'https://example.com/graphql?operationName=GetUser&query=query+GetUser+%7B+user+%7B+id+%7D+%7D';
+    const result = matchRule(rules, url, 'GET');
     expect(result).not.toBeNull();
+  });
+});
+
+describe('extractGraphQLFromUrl', () => {
+  it('extracts operationName and query from URL params', () => {
+    const result = extractGraphQLFromUrl('https://example.com/graphql?operationName=GetUser&query=query+GetUser');
+    expect(result).toEqual({ operationName: 'GetUser', query: 'query GetUser' });
+  });
+
+  it('extracts variables from URL params', () => {
+    const result = extractGraphQLFromUrl('https://example.com/graphql?operationName=GetUser&variables=%7B%22id%22%3A%221%22%7D');
+    expect(result?.operationName).toBe('GetUser');
+    expect(result?.variables).toEqual({ id: '1' });
+  });
+
+  it('returns undefined when no GraphQL params', () => {
+    expect(extractGraphQLFromUrl('https://example.com/api/users')).toBeUndefined();
   });
 });

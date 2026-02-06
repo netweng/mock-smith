@@ -55,6 +55,10 @@ export interface TrafficLogEntry {
   timestamp: number;
   requestHeaders?: Record<string, string>;
   responseStatus?: number;
+  tabId?: number;
+  requestType?: RuleType;
+  operationName?: string | string[];
+  responseBody?: string;
 }
 
 export function generateId(): string {

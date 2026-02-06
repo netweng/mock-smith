@@ -56,6 +56,14 @@ export const storage = {
     await this.saveRules(rules.filter((r) => r.id !== id));
   },
 
+  async reorderRules(fromIndex: number, toIndex: number): Promise<void> {
+    const rules = await this.getRules();
+    if (fromIndex < 0 || fromIndex >= rules.length || toIndex < 0 || toIndex >= rules.length) return;
+    const [moved] = rules.splice(fromIndex, 1);
+    rules.splice(toIndex, 0, moved);
+    await this.saveRules(rules);
+  },
+
   async toggleRule(id: string): Promise<void> {
     const rules = await this.getRules();
     const idx = rules.findIndex((r) => r.id === id);

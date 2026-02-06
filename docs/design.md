@@ -86,9 +86,13 @@ Implemented in `src/shared/rule-engine.ts` — the single source of truth for al
 4. **Headers** — all rule headers must be present in request (name case-insensitive, value exact)
 5. **GraphQL** — operationName exact match, query substring match, variables subset match (deep equality)
 
+### GET GraphQL Auto-Extraction
+
+When no request body is provided (e.g. GET requests), `matchRule` automatically extracts GraphQL params (`query`, `operationName`, `variables`) from URL search params via `extractGraphQLFromUrl()`. This logic lives entirely in `rule-engine.ts`.
+
 ### First Match Wins
 
-Rules are evaluated in array order. The first matching rule is returned regardless of action type.
+Rules are evaluated in array order (storage array index = priority). The first matching rule is returned regardless of action type. Users can drag-and-drop rules in the Dashboard to change priority.
 
 ### URL Matching
 
@@ -120,7 +124,7 @@ Sends the real request, then modifies the response before returning it to the ca
 
 ### Passthrough
 
-Matches the rule (and logs the interception) but lets the request proceed unmodified. Useful for whitelisting or traffic observation.
+Matches the rule (and logs the interception) but lets the request proceed unmodified. Useful for whitelisting or traffic observation. Error/abort events are also logged for both fetch and XHR to ensure complete observability.
 
 ## Traffic Logs Design
 
@@ -147,6 +151,10 @@ interface TrafficLogEntry {
   timestamp: number;
   requestHeaders?: Record<string, string>;
   responseStatus?: number;
+  tabId?: number;
+  requestType?: 'rest' | 'graphql';
+  operationName?: string | string[];
+  responseBody?: string;        // Truncated to 10KB; binary content skipped
 }
 ```
 

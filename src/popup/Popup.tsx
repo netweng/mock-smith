@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Rule } from '../shared/types';
+import { Rule, TrafficLogEntry } from '../shared/types';
 import { storage } from '../shared/storage';
 
 const isChromeExtension =
@@ -24,6 +24,9 @@ export const Popup: React.FC = () => {
   const [tabId, setTabId] = useState<number | null>(null);
   const [tabEnabled, setTabEnabled] = useState(true);
   const [tabInjectable, setTabInjectable] = useState(true);
+
+  // Hit counts per ruleId (filtered by current tab)
+  const [hitCounts, setHitCounts] = useState<Record<string, number>>({});
 
   const refresh = useCallback(async () => {
     const r = await storage.getRules();
@@ -60,6 +63,40 @@ export const Popup: React.FC = () => {
     });
   }, []);
 
+  // Compute hit counts from logs
+  const computeHitCounts = useCallback((logs: TrafficLogEntry[], tid: number | null) => {
+    const counts: Record<string, number> = {};
+    for (const log of logs) {
+      if (tid !== null && log.tabId !== tid) continue;
+      counts[log.ruleId] = (counts[log.ruleId] || 0) + 1;
+    }
+    setHitCounts(counts);
+  }, []);
+
+  // Load initial logs + listen for LOG_ADDED (re-run when tabId becomes available)
+  useEffect(() => {
+    if (!isChromeExtension) return;
+
+    // Fetch existing logs (re-computes when tabId changes)
+    storage.getLogs().then((logs) => {
+      computeHitCounts(logs, tabId);
+    });
+
+    // Listen for new log entries
+    const listener = (message: any) => {
+      if (message.type === 'LOG_ADDED' && message.entry) {
+        const entry = message.entry as TrafficLogEntry;
+        if (tabId !== null && entry.tabId !== tabId) return;
+        setHitCounts((prev) => ({
+          ...prev,
+          [entry.ruleId]: (prev[entry.ruleId] || 0) + 1,
+        }));
+      }
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
+  }, [computeHitCounts, tabId]);
+
   const handleToggleTab = () => {
     if (tabId === null || !tabInjectable) return;
     const newEnabled = !tabEnabled;
@@ -80,7 +117,6 @@ export const Popup: React.FC = () => {
   };
 
   const activeCount = rules.filter((r) => r.enabled).length;
-  const enabledRules = rules.filter((r) => r.enabled);
   const effectiveActive = tabEnabled && tabInjectable;
 
   if (loading) {
@@ -102,7 +138,7 @@ export const Popup: React.FC = () => {
             </div>
             <h1 className="text-headline text-lg font-bold leading-tight tracking-tight font-display">MockSmith</h1>
           </div>
-          
+
           {/* Per-Tab Switch */}
           {isChromeExtension && (
             <div className="flex items-center gap-2">
@@ -125,47 +161,59 @@ export const Popup: React.FC = () => {
         </div>
       </header>
 
-      {/* Active Rules List */}
-      {enabledRules.length > 0 && (
-        <div className={`px-3 py-2 max-h-[240px] overflow-y-auto transition-opacity ${!effectiveActive ? 'opacity-50 pointer-events-none' : ''}`}>
-          <h3 className="text-xs font-bold text-secondary uppercase tracking-wider px-2 mb-2">Active Rules</h3>
+      {/* All Rules List */}
+      {rules.length > 0 && (
+        <div className={`px-3 py-2 max-h-[320px] overflow-y-auto transition-opacity ${!effectiveActive ? 'opacity-50 pointer-events-none' : ''}`}>
+          <h3 className="text-xs font-bold text-secondary uppercase tracking-wider px-2 mb-2">All Rules</h3>
           <div className="flex flex-col gap-2">
-            {enabledRules.slice(0, 8).map((rule) => (
-              <div
-                key={rule.id}
-                className="flex items-center justify-between p-3 rounded-lg border border-secondary/20 bg-white hover:border-primary/30 hover:bg-primary/5 transition-colors shadow-sm"
-              >
-                <div className="flex flex-col gap-1 min-w-0 flex-1 pr-3">
-                  <div className="flex items-center gap-2">
-                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded border ${
-                      rule.type === 'graphql'
-                        ? 'bg-primary/20 text-primary border-primary/30'
-                        : getMethodColor(rule.match.method || 'ANY')
-                    }`}>
-                      {rule.type === 'graphql' ? 'GQL' : (rule.match.method || 'ANY')}
-                    </span>
-                    <span className="text-headline text-sm font-bold truncate">{rule.name}</span>
+            {rules.map((rule) => {
+              const count = hitCounts[rule.id] || 0;
+              return (
+                <div
+                  key={rule.id}
+                  className={`flex items-center justify-between p-3 rounded-lg border bg-white transition-colors shadow-sm ${
+                    rule.enabled
+                      ? 'border-secondary/20 hover:border-primary/30 hover:bg-primary/5'
+                      : 'border-slate-100 opacity-60'
+                  }`}
+                >
+                  <div className="flex flex-col gap-1 min-w-0 flex-1 pr-3">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-bold px-1.5 py-0.5 rounded border ${
+                        rule.type === 'graphql'
+                          ? 'bg-primary/20 text-primary border-primary/30'
+                          : getMethodColor(rule.match.method || 'ANY')
+                      }`}>
+                        {rule.type === 'graphql' ? 'GQL' : (rule.match.method || 'ANY')}
+                      </span>
+                      <span className="text-headline text-sm font-bold truncate">{rule.name}</span>
+                    </div>
+                    <p className="text-xs text-paragraph truncate font-mono">{rule.match.url}</p>
                   </div>
-                  <p className="text-xs text-paragraph truncate font-mono">{rule.match.url}</p>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {/* Hit count badge */}
+                    <span className={`text-[10px] font-bold min-w-[20px] h-5 flex items-center justify-center rounded-full px-1.5 ${
+                      count > 0
+                        ? 'bg-primary/10 text-primary'
+                        : 'bg-slate-100 text-slate-400'
+                    }`}>
+                      {count}
+                    </span>
+                    <label className="relative inline-block w-8 align-middle select-none cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={rule.enabled}
+                        onChange={() => handleToggleRule(rule.id)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-8 h-4 bg-gray-200 rounded-full peer peer-checked:bg-primary transition-colors"></div>
+                      <div className="absolute left-0 top-[-2px] bg-white w-5 h-5 rounded-full border border-gray-300 shadow-sm transition-transform peer-checked:translate-x-3 peer-checked:border-primary"></div>
+                    </label>
+                  </div>
                 </div>
-                <label className="relative inline-block w-8 align-middle select-none flex-shrink-0 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={rule.enabled}
-                    onChange={() => handleToggleRule(rule.id)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-8 h-4 bg-gray-200 rounded-full peer peer-checked:bg-primary transition-colors"></div>
-                  <div className="absolute left-0 top-[-2px] bg-white w-5 h-5 rounded-full border border-gray-300 shadow-sm transition-transform peer-checked:translate-x-3 peer-checked:border-primary"></div>
-                </label>
-              </div>
-            ))}
+              );
+            })}
           </div>
-          {enabledRules.length > 8 && (
-            <div className="text-[10px] text-paragraph text-center py-1">
-              +{enabledRules.length - 8} more
-            </div>
-          )}
         </div>
       )}
 
@@ -176,17 +224,6 @@ export const Popup: React.FC = () => {
           </span>
           <p className="text-xs text-paragraph">
             No rules yet. Open the dashboard to create your first mock rule.
-          </p>
-        </div>
-      )}
-
-      {enabledRules.length === 0 && rules.length > 0 && (
-        <div className="px-5 py-6 text-center">
-          <span className="material-symbols-outlined text-3xl text-slate-300 mb-2 block">
-            toggle_off
-          </span>
-          <p className="text-xs text-paragraph">
-            No active rules. Enable some rules to start intercepting requests.
           </p>
         </div>
       )}

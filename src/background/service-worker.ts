@@ -124,7 +124,7 @@ let logCounter = 0;
 
 // --- Message handling ---
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'GET_STATE') {
     chrome.storage.local.get('mocksmith_rules').then((data) => {
       sendResponse({
@@ -189,6 +189,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       timestamp: message.data.timestamp || Date.now(),
       requestHeaders: message.data.requestHeaders,
       responseStatus: message.data.responseStatus,
+      tabId: sender.tab?.id,
+      requestType: message.data.requestType,
+      operationName: message.data.operationName,
+      responseBody: message.data.responseBody,
     };
     trafficLogs.push(entry);
     if (trafficLogs.length > MAX_LOGS) {

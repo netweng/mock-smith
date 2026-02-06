@@ -94,6 +94,23 @@ Dashboard 是 MockSmith 的核心管理界面，可通过 Popup 的 "Open Dashbo
 | Action | `mock` / `rewrite` / `passthrough` 标签 |
 | Actions | 鼠标悬停显示操作按钮：**Edit**（编辑）、**Duplicate**（复制）、**Delete**（删除） |
 
+### Import / Export（导入 / 导出）
+
+工具栏中的 **Import** 和 **Export** 按钮支持规则的批量管理：
+
+| 操作 | 说明 |
+|------|------|
+| **Export** | 将当前所有规则导出为 JSON 文件（`mocksmith-rules-YYYY-MM-DD.json`） |
+| **Import** | 从 JSON 文件导入规则。自动按"名称 + URL"去重，已存在的规则会被跳过。导入完成后显示结果提示 |
+
+导出的 JSON 格式为规则数组，可直接在团队间共享或版本控制。
+
+### 拖拽排序（规则优先级）
+
+规则表格左侧显示拖拽手柄（⠿ 图标），拖动行可调整规则顺序。**排列越靠前的规则优先级越高**——匹配引擎按数组顺序依次评估，命中第一条即停止。
+
+> 注意：搜索筛选时拖拽排序不可用。
+
 ### New Rule（新建规则）
 
 点击右上角的 **+ New Rule** 按钮跳转到规则编辑页面，创建新规则。

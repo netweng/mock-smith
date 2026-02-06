@@ -1,8 +1,40 @@
 import { Rule } from './types';
 
 /**
+ * Extract GraphQL params from GET URL search params.
+ * Returns a parsed object with query/operationName/variables if found, otherwise undefined.
+ */
+export function extractGraphQLFromUrl(url: string): any | undefined {
+  try {
+    const urlObj = new URL(url, typeof location !== 'undefined' ? location.origin : undefined);
+    const query = urlObj.searchParams.get('query');
+    const operationName = urlObj.searchParams.get('operationName');
+    const variablesStr = urlObj.searchParams.get('variables');
+
+    if (!query && !operationName) return undefined;
+
+    const result: any = {};
+    if (query) result.query = query;
+    if (operationName) result.operationName = operationName;
+    if (variablesStr) {
+      try {
+        result.variables = JSON.parse(variablesStr);
+      } catch {
+        // Ignore invalid variables JSON
+      }
+    }
+    return result;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Find the first matching rule for a given request.
  * Returns null if no rule matches or interception is disabled.
+ *
+ * For GET requests without a body, automatically extracts GraphQL params
+ * from URL search params for matching.
  */
 export function matchRule(
   rules: Rule[],
@@ -11,6 +43,9 @@ export function matchRule(
   body?: any,
   headers?: Record<string, string>,
 ): Rule | null {
+  // For requests without a body, try extracting GraphQL params from URL
+  const effectiveBody = body || extractGraphQLFromUrl(url);
+
   for (const rule of rules) {
     if (!rule.enabled) continue;
 
@@ -27,7 +62,7 @@ export function matchRule(
 
     // GraphQL-specific matching
     if (rule.type === 'graphql' && rule.graphqlMatch) {
-      if (!matchGraphQL(body, rule.graphqlMatch)) continue;
+      if (!matchGraphQL(effectiveBody, rule.graphqlMatch)) continue;
     }
 
     return rule;
