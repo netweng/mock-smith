@@ -80,6 +80,14 @@ import type { Rule } from '../shared/types';
     return undefined;
   }
 
+  /** Detect whether the request is actually GraphQL based on body/URL, regardless of rule type */
+  function detectRequestType(rule: Rule, body: any, url: string): 'rest' | 'graphql' {
+    if (rule.type === 'graphql') return 'graphql';
+    // Check if the body or URL contains GraphQL indicators
+    if (extractOperationName(body, url) !== undefined) return 'graphql';
+    return 'rest';
+  }
+
   function notifyInterception(
     url: string,
     method: string,
@@ -88,6 +96,7 @@ import type { Rule } from '../shared/types';
     responseStatus?: number,
     operationName?: string | string[],
     responseBody?: string,
+    requestType?: 'rest' | 'graphql',
   ) {
     window.postMessage(
       {
@@ -99,7 +108,7 @@ import type { Rule } from '../shared/types';
           ruleId: rule.id,
           ruleName: rule.name,
           action: rule.action,
-          requestType: rule.type,
+          requestType: requestType || rule.type,
           timestamp: Date.now(),
           requestHeaders,
           responseStatus,
@@ -288,7 +297,8 @@ import type { Rule } from '../shared/types';
     const matched = findMatch(url, method, body, headers);
 
     if (matched) {
-      const opName = matched.type === 'graphql'
+      const reqType = detectRequestType(matched, body, url);
+      const opName = reqType === 'graphql'
         ? extractOperationName(body, url)
         : undefined;
 
@@ -304,11 +314,11 @@ import type { Rule } from '../shared/types';
             try {
               respBody = await safeReadResponseBody(response);
             } catch {}
-            notifyInterception(url, method, matched, headers, response.status, opName, respBody);
+            notifyInterception(url, method, matched, headers, response.status, opName, respBody, reqType);
             return response;
           } catch (err) {
             notifyInterception(url, method, matched, headers, 0, opName,
-              `[fetch error] ${err instanceof Error ? err.message : String(err)}`);
+              `[fetch error] ${err instanceof Error ? err.message : String(err)}`, reqType);
             throw err;
           }
         }
@@ -317,11 +327,11 @@ import type { Rule } from '../shared/types';
           try {
             const original = await originalFetch.call(this, input, init);
             const rewritten = await buildRewriteResponse(original, matched);
-            notifyInterception(url, method, matched, headers, rewritten.status, opName);
+            notifyInterception(url, method, matched, headers, rewritten.status, opName, undefined, reqType);
             return rewritten;
           } catch (err) {
             notifyInterception(url, method, matched, headers, 0, opName,
-              `[fetch error] ${err instanceof Error ? err.message : String(err)}`);
+              `[fetch error] ${err instanceof Error ? err.message : String(err)}`, reqType);
             throw err;
           }
         }
@@ -329,7 +339,7 @@ import type { Rule } from '../shared/types';
         case 'mock':
         default: {
           const mockStatus = matched.response.status || 200;
-          notifyInterception(url, method, matched, headers, mockStatus, opName);
+          notifyInterception(url, method, matched, headers, mockStatus, opName, undefined, reqType);
           return buildMockResponse(matched);
         }
       }
@@ -404,7 +414,8 @@ import type { Rule } from '../shared/types';
     const matched = findMatch(url, method, body, headers);
 
     if (matched) {
-      const opName = matched.type === 'graphql'
+      const reqType = detectRequestType(matched, body, url);
+      const opName = reqType === 'graphql'
         ? extractOperationName(body, url)
         : undefined;
 
@@ -425,15 +436,15 @@ import type { Rule } from '../shared/types';
               const text = typeof xhr.responseText === 'string' ? xhr.responseText : '';
               respBody = truncateBody(text);
             } catch {}
-            notifyInterception(url, method, matched, headers, xhr.status, opName, respBody);
+            notifyInterception(url, method, matched, headers, xhr.status, opName, respBody, reqType);
           });
           xhr.addEventListener('error', function ptErrHandler() {
             xhr.removeEventListener('error', ptErrHandler);
-            notifyInterception(url, method, matched, headers, 0, opName, '[xhr error]');
+            notifyInterception(url, method, matched, headers, 0, opName, '[xhr error]', reqType);
           });
           xhr.addEventListener('abort', function ptAbortHandler() {
             xhr.removeEventListener('abort', ptAbortHandler);
-            notifyInterception(url, method, matched, headers, 0, opName, '[xhr abort]');
+            notifyInterception(url, method, matched, headers, 0, opName, '[xhr abort]', reqType);
           });
           return origSend.call(this, sendBody);
         }
@@ -443,11 +454,11 @@ import type { Rule } from '../shared/types';
 
           xhr.addEventListener('error', function rwErrHandler() {
             xhr.removeEventListener('error', rwErrHandler);
-            notifyInterception(url, method, matched, headers, 0, opName, '[xhr error]');
+            notifyInterception(url, method, matched, headers, 0, opName, '[xhr error]', reqType);
           });
           xhr.addEventListener('abort', function rwAbortHandler() {
             xhr.removeEventListener('abort', rwAbortHandler);
-            notifyInterception(url, method, matched, headers, 0, opName, '[xhr abort]');
+            notifyInterception(url, method, matched, headers, 0, opName, '[xhr abort]', reqType);
           });
           xhr.addEventListener('load', function rewriteHandler() {
             xhr.removeEventListener('load', rewriteHandler);
@@ -478,7 +489,7 @@ import type { Rule } from '../shared/types';
               Object.defineProperty(xhr, 'responseText', { writable: true, value: responseBody });
               Object.defineProperty(xhr, 'response', { writable: true, value: responseBody });
             }
-            notifyInterception(url, method, matched, headers, rewriteStatus, opName);
+            notifyInterception(url, method, matched, headers, rewriteStatus, opName, undefined, reqType);
           });
           return origSend.call(this, sendBody);
         }
@@ -486,7 +497,7 @@ import type { Rule } from '../shared/types';
         case 'mock':
         default: {
           const mockStatus = matched.response.status || 200;
-          notifyInterception(url, method, matched, headers, mockStatus, opName);
+          notifyInterception(url, method, matched, headers, mockStatus, opName, undefined, reqType);
           fakeXhrResponse(this, mockStatus, responseBody, url, delay);
           return;
         }

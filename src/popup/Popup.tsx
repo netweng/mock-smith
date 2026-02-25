@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Rule, TrafficLogEntry } from '../shared/types';
+import { Rule } from '../shared/types';
 import { storage } from '../shared/storage';
 
 const isChromeExtension =
@@ -63,39 +63,47 @@ export const Popup: React.FC = () => {
     });
   }, []);
 
-  // Compute hit counts from logs
-  const computeHitCounts = useCallback((logs: TrafficLogEntry[], tid: number | null) => {
-    const counts: Record<string, number> = {};
-    for (const log of logs) {
-      if (tid !== null && log.tabId !== tid) continue;
-      counts[log.ruleId] = (counts[log.ruleId] || 0) + 1;
-    }
-    setHitCounts(counts);
-  }, []);
-
-  // Load initial logs + listen for LOG_ADDED (re-run when tabId becomes available)
+  // Read hit counts directly from chrome.storage.local (no messaging needed)
   useEffect(() => {
     if (!isChromeExtension) return;
 
-    // Fetch existing logs (re-computes when tabId changes)
-    storage.getLogs().then((logs) => {
-      computeHitCounts(logs, tabId);
-    });
+    const HIT_COUNTS_KEY = 'mocksmith_hit_counts';
 
-    // Listen for new log entries
-    const listener = (message: any) => {
-      if (message.type === 'LOG_ADDED' && message.entry) {
-        const entry = message.entry as TrafficLogEntry;
-        if (tabId !== null && entry.tabId !== tabId) return;
-        setHitCounts((prev) => ({
-          ...prev,
-          [entry.ruleId]: (prev[entry.ruleId] || 0) + 1,
-        }));
+    function readCounts() {
+      chrome.storage.local.get(HIT_COUNTS_KEY).then((data) => {
+        const all: Record<string, Record<string, number>> | undefined = data[HIT_COUNTS_KEY];
+        if (!all) { setHitCounts({}); return; }
+        if (tabId !== null) {
+          setHitCounts(all[String(tabId)] || {});
+        } else {
+          const merged: Record<string, number> = {};
+          for (const tabCounts of Object.values(all)) {
+            for (const [ruleId, count] of Object.entries(tabCounts)) {
+              merged[ruleId] = (merged[ruleId] || 0) + count;
+            }
+          }
+          setHitCounts(merged);
+        }
+      });
+    }
+
+    // Initial read + poll every 2s as reliable fallback
+    readCounts();
+    const interval = setInterval(readCounts, 2000);
+
+    // Also listen for storage changes as a fast path
+    const listener = (changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
+      if (areaName === 'local' && changes[HIT_COUNTS_KEY]) {
+        readCounts();
       }
     };
-    chrome.runtime.onMessage.addListener(listener);
-    return () => chrome.runtime.onMessage.removeListener(listener);
-  }, [computeHitCounts, tabId]);
+    chrome.storage.onChanged.addListener(listener);
+
+    return () => {
+      clearInterval(interval);
+      chrome.storage.onChanged.removeListener(listener);
+    };
+  }, [tabId]);
 
   const handleToggleTab = () => {
     if (tabId === null || !tabInjectable) return;

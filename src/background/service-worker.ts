@@ -125,6 +125,27 @@ const MAX_LOGS = 500;
 let trafficLogs: TrafficLogEntry[] = [];
 let logCounter = 0;
 
+// --- Hit counts persisted in chrome.storage.local (readable by popup without messaging) ---
+
+const HIT_COUNTS_KEY = 'mocksmith_hit_counts';
+
+// Queue to serialize read-modify-write and prevent concurrent overwrites
+let hitCountQueue = Promise.resolve();
+
+function incrementHitCount(tabId: number | undefined, ruleId: string): Promise<void> {
+  hitCountQueue = hitCountQueue.then(async () => {
+    const data = await chrome.storage.local.get(HIT_COUNTS_KEY);
+    const all: Record<string, Record<string, number>> = data[HIT_COUNTS_KEY] || {};
+    const tabKey = String(tabId ?? 0);
+    if (!all[tabKey]) all[tabKey] = {};
+    all[tabKey][ruleId] = (all[tabKey][ruleId] || 0) + 1;
+    await chrome.storage.local.set({ [HIT_COUNTS_KEY]: all });
+  }).catch((err) => {
+    console.error('[MockSmith] incrementHitCount FAILED:', err);
+  });
+  return hitCountQueue;
+}
+
 // --- Message handling ---
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -201,9 +222,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (trafficLogs.length > MAX_LOGS) {
       trafficLogs = trafficLogs.slice(-MAX_LOGS);
     }
+    // Persist hit count to chrome.storage.local (readable by popup without messaging)
+    // return true keeps the SW alive until the async write completes
+    incrementHitCount(entry.tabId, entry.ruleId)
+      .finally(() => sendResponse({ ok: true }));
     // Broadcast to any listening UI (dashboard Traffic Logs page)
     chrome.runtime.sendMessage({ type: 'LOG_ADDED', entry }).catch(() => {});
-    return false;
+    return true;
   }
 
   if (message.type === 'GET_LOGS') {
@@ -214,6 +239,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'CLEAR_LOGS') {
     trafficLogs = [];
     logCounter = 0;
+    chrome.storage.local.remove(HIT_COUNTS_KEY);
     sendResponse({ ok: true });
     return false;
   }

@@ -157,9 +157,9 @@ export const TrafficLogs: React.FC = () => {
             </p>
           </div>
         ) : (
-          <div className="flex-1 flex flex-col lg:flex-row gap-6 overflow-hidden">
+          <div className="flex-1 flex flex-row gap-6 overflow-hidden">
             {/* Table Card */}
-            <div className="flex-1 bg-white rounded-2xl border border-border-light flex flex-col shadow-sm overflow-hidden">
+            <div className="flex-1 min-w-0 bg-white rounded-2xl border border-border-light flex flex-col shadow-sm overflow-hidden transition-all duration-300">
               <div className="overflow-auto flex-1">
                 <table className="w-full text-left border-collapse">
                   <thead className="sticky top-0 bg-white z-10 shadow-sm">
@@ -167,6 +167,7 @@ export const TrafficLogs: React.FC = () => {
                       <th className="py-4 px-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest w-24">Time</th>
                       <th className="py-4 px-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest w-20">Method</th>
                       <th className="py-4 px-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest">URL</th>
+                      <th className="py-4 px-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest w-36">Rule Name</th>
                       <th className="py-4 px-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest w-28">Req Type</th>
                       <th className="py-4 px-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest w-16 text-center">Status</th>
                       <th className="py-4 px-6 text-[10px] font-bold text-slate-400 uppercase tracking-widest w-28">Action</th>
@@ -194,6 +195,11 @@ export const TrafficLogs: React.FC = () => {
                             <p className="text-sm font-medium truncate text-headline max-w-[180px] xl:max-w-sm">
                               {log.url}
                             </p>
+                          </td>
+                          <td className="py-4 px-6">
+                            <span className="text-xs font-medium text-paragraph truncate block max-w-[120px]" title={log.ruleName || ''}>
+                              {log.ruleName || '—'}
+                            </span>
                           </td>
                           <td className="py-4 px-6">
                             {log.requestType === 'graphql' ? (
@@ -247,9 +253,15 @@ export const TrafficLogs: React.FC = () => {
               </div>
             </div>
 
-            {/* Details Panel */}
-            <div className="w-full lg:w-[400px] xl:w-[460px] shrink-0 bg-white rounded-2xl border border-border-light flex flex-col shadow-sm overflow-hidden h-full">
-              {selectedLog ? (
+            {/* Details Panel — slides in/out */}
+            <div
+              className={`shrink-0 bg-white rounded-2xl border border-border-light flex flex-col shadow-sm overflow-hidden h-full transition-all duration-300 ease-in-out ${
+                selectedLog
+                  ? 'w-[400px] xl:w-[460px] opacity-100 translate-x-0'
+                  : 'w-0 opacity-0 translate-x-4 border-0 p-0'
+              }`}
+            >
+              {selectedLog && (
                 <>
                   <div className="p-4 border-b border-slate-50 bg-slate-50/50">
                     <div className="flex items-center justify-between mb-2">
@@ -259,11 +271,20 @@ export const TrafficLogs: React.FC = () => {
                         </span>
                         <MethodBadge method={selectedLog.method} />
                       </div>
-                      <span className="text-xs text-paragraph font-mono">{formatTime(selectedLog.timestamp)}</span>
+                      <button
+                        onClick={() => setSelectedLog(null)}
+                        className="p-1 text-slate-400 hover:text-headline hover:bg-slate-100 rounded-lg transition-colors"
+                        title="Close panel"
+                      >
+                        <span className="material-symbols-outlined text-lg">close</span>
+                      </button>
                     </div>
-                    <p className="font-mono text-sm text-headline truncate" title={selectedLog.url}>
-                      {selectedLog.url}
-                    </p>
+                    <div className="flex items-center justify-between">
+                      <p className="font-mono text-sm text-headline truncate flex-1 mr-2" title={selectedLog.url}>
+                        {selectedLog.url}
+                      </p>
+                      <span className="text-xs text-paragraph font-mono shrink-0">{formatTime(selectedLog.timestamp)}</span>
+                    </div>
                   </div>
 
                   {/* Tabs */}
@@ -368,11 +389,6 @@ export const TrafficLogs: React.FC = () => {
                     </button>
                   </div>
                 </>
-              ) : (
-                <div className="flex-1 flex flex-col items-center justify-center gap-3 text-paragraph p-8">
-                  <span className="material-symbols-outlined text-4xl text-slate-300">touch_app</span>
-                  <p className="text-sm text-center">Select a log entry to view details</p>
-                </div>
               )}
             </div>
           </div>
