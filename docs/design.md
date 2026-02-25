@@ -14,6 +14,17 @@ Chrome MV3 enforces strict context isolation. MockSmith operates across three co
 | Bridge | `bridge.ts` | ISOLATED | `chrome.*` APIs, `window.postMessage` |
 | Interceptor | `interceptor.ts` | MAIN | Page `window`, `fetch`, `XMLHttpRequest` |
 
+## Script Injection Order
+
+The service worker injects content scripts via `chrome.scripting.executeScript` on each page load (`tabs.onUpdated` with `status === 'loading'`):
+
+1. **Interceptor** (MAIN world, `injectImmediately: true`) — overrides `fetch`/`XHR` and sets up its `message` listener
+2. **Bridge** (ISOLATED world, `injectImmediately: true`) — reads rules from `chrome.storage.local` and posts them to the Interceptor via `postMessage`
+
+> **Why Interceptor first?** The Bridge's `chrome.storage.local.get` callback can fire very quickly (especially when data is warm). If the Bridge were injected first, its `postMessage` could arrive before the Interceptor's listener exists, silently losing the rules. Injecting the Interceptor first guarantees the listener is ready.
+
+As a safety net, the Interceptor also sends an `INTERCEPTOR_READY` signal after setting up its listener. The Bridge responds to this by (re-)sending rules, ensuring delivery even if the initial `postRulesToPage()` fires too early.
+
 ## Request Interception Chain
 
 ```
@@ -176,6 +187,17 @@ Dashboard polls the service worker every 2 seconds via `GET_LOGS` message. `CLEA
 ```
 
 ### Interceptor → Bridge
+
+**Ready handshake** (sent once after listener setup):
+
+```json
+{
+  "source": "mocksmith-interceptor",
+  "type": "INTERCEPTOR_READY"
+}
+```
+
+**Interception log**:
 
 ```json
 {

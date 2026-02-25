@@ -38,18 +38,21 @@ function isInjectableUrl(url: string | undefined): boolean {
 
 async function injectContentScripts(tabId: number): Promise<void> {
   try {
-    // Bridge (ISOLATED world, default)
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ['bridge.js'],
-      injectImmediately: true,
-    });
-    // Interceptor (MAIN world)
+    // Interceptor MUST be injected first so its message listener is ready
+    // before the Bridge posts rules. Otherwise a race condition occurs:
+    // Bridge's chrome.storage.local.get callback can fire before the
+    // Interceptor's listener is set up, causing the rules message to be lost.
     await chrome.scripting.executeScript({
       target: { tabId },
       files: ['interceptor.js'],
       injectImmediately: true,
       world: 'MAIN' as any,
+    });
+    // Bridge (ISOLATED world) — reads storage and posts rules to Interceptor
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['bridge.js'],
+      injectImmediately: true,
     });
   } catch (e) {
     console.warn(`[MockSmith] Failed to inject scripts into tab ${tabId}:`, e);

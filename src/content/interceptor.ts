@@ -123,6 +123,14 @@ import type { Rule } from '../shared/types';
     }
   });
 
+  // Signal that the interceptor is ready to receive rules.
+  // The bridge listens for this and (re-)sends rules, providing a
+  // handshake that eliminates race conditions in script injection order.
+  window.postMessage(
+    { source: 'mocksmith-interceptor', type: 'INTERCEPTOR_READY' },
+    '*',
+  );
+
   // --- Helper: read body as text from various BodyInit types ---
 
   async function readBodyAsText(body: any): Promise<string | undefined> {

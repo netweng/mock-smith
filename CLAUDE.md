@@ -63,9 +63,11 @@ chrome.storage.local ──► Bridge (ISOLATED) ──postMessage──► Inte
                                                          未命中   → 放行
 ```
 
+- **注入顺序**：Interceptor 先于 Bridge 注入（避免竞态：Bridge 的 storage 回调可能在 Interceptor listener 就绪前触发）
+- **握手机制**：Interceptor 就绪后发送 `INTERCEPTOR_READY`，Bridge 收到后补发规则，双重保险
 - **Bridge** 能访问 chrome API，不能碰页面 window
 - **Interceptor** 能覆写页面 fetch/XHR，不能访问 chrome API
-- 两者通过 `window.postMessage` + `source: 'mocksmith-bridge'` 通信
+- 两者通过 `window.postMessage` + `source: 'mocksmith-bridge'` / `source: 'mocksmith-interceptor'` 通信
 - 规则变更时 Bridge 监听 `chrome.storage.onChanged` 自动重新投递，无需刷新页面
 
 ## 规则模型

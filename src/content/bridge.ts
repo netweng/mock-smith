@@ -50,16 +50,22 @@ if (!(window as any).__MOCKSMITH_BRIDGE_INSTALLED__) {
     }
   });
 
-  // Forward interception logs from MAIN world to service worker
+  // Forward interception logs from MAIN world to service worker,
+  // and handle the INTERCEPTOR_READY handshake.
   window.addEventListener('message', (event) => {
-    if (
-      event.data?.source === 'mocksmith-interceptor' &&
-      event.data?.type === 'REQUEST_INTERCEPTED'
-    ) {
-      chrome.runtime.sendMessage({
-        type: 'REQUEST_INTERCEPTED',
-        data: event.data.data,
-      });
+    if (event.data?.source === 'mocksmith-interceptor') {
+      if (event.data.type === 'REQUEST_INTERCEPTED') {
+        chrome.runtime.sendMessage({
+          type: 'REQUEST_INTERCEPTED',
+          data: event.data.data,
+        });
+      }
+      // Re-send rules when interceptor signals it is ready.
+      // This eliminates the race where postRulesToPage() fires
+      // before the interceptor's message listener is set up.
+      if (event.data.type === 'INTERCEPTOR_READY') {
+        postRulesToPage();
+      }
     }
   });
 }
